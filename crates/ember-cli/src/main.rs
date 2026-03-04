@@ -1,0 +1,42 @@
+use std::env;
+use clap::{Parser, Subcommand};
+use ember_core::{Ember, EmberResult, error::EmberError};
+
+#[derive(Parser)]
+#[command(name = "ember")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Init,
+    CreateTable {
+        table_name: String,
+        schema: Vec<String>,
+    }
+}
+
+fn run() -> EmberResult<()> {
+    let path = env::current_dir()
+        .map_err(|e| EmberError::io(e, "getting current directory"))?;
+    let ember = Ember::new(path);
+
+    let cli = Cli::parse();
+    match cli.command {
+        Commands::Init => ember.init()?,
+        Commands::CreateTable {table_name, schema} => ember.create_table(&table_name, schema)?,
+    };
+
+    Ok(())
+}
+
+fn main() {
+
+    if let Err(e) = run() {
+        eprintln!("Error: {}",e);
+        std::process::exit(e.exit_code());
+    }
+    
+}
