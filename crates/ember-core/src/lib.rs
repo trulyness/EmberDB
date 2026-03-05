@@ -18,14 +18,14 @@ pub struct Ember {
     data_directory: PathBuf,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, PartialEq, Debug)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum ColumnType {
     INT,
     TEXT
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, PartialEq, Debug)]
 struct Column {
     #[serde(rename = "name")]
     col_name: String,
@@ -143,10 +143,105 @@ impl Ember {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
     fn magic_string_length() {
         assert_eq!(MAGIC.as_bytes().len(),4);
     }
+
+    #[test]
+    fn test_validate_and_extract_schema_error_cases() {
+        assert!(matches!(
+            Ember::validate_and_extract_schema(vec![]),
+            Err(EmberError::EmptySchema)
+        ));
+    
+        assert!(matches!(
+            Ember::validate_and_extract_schema(vec!["token".to_string()]),
+            Err(EmberError::InvalidSchemaToken { .. })
+        ));
+
+        assert!(matches!(
+            Ember::validate_and_extract_schema(vec!["user:jpg".to_string()]),
+            Err(EmberError::UnknownColumnType { .. })
+        ));
+
+        assert!(matches!(
+            Ember::validate_and_extract_schema(vec!["user:text".to_string(),"age:int".to_string(),"age:INT".to_string()]),
+            Err(EmberError::ColumnAlreadyExists { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_and_extract_schema_success() {
+        let result = Ember::validate_and_extract_schema(vec![
+            "user:Text".into(),
+            "age:iNt".into(),
+            "Age:INt".into(),
+            "AGE:int".into(),
+        ])
+        .expect("schema should be valid");
+
+        assert_eq!(
+            result,
+            vec![
+                Column {
+                    col_name: "user".into(),
+                    col_type: ColumnType::TEXT
+                },
+                Column {
+                    col_name: "age".into(),
+                    col_type: ColumnType::INT
+                },
+                Column {
+                    col_name: "Age".into(),
+                    col_type: ColumnType::INT
+                },
+                Column {
+                    col_name: "AGE".into(),
+                    col_type: ColumnType::INT
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn test_validate_name_error_cases() {
+        let cases = vec![
+            ("", Kind::Column, EMPTY_NAME),
+            ("", Kind::Table, EMPTY_NAME),
+            ("1ABC", Kind::Table, INVALID_START_CHARACTER),
+            ("ABC@", Kind::Table, INVALID_CHARACTERS),
+        ];
+
+        for (name, kind, reason) in cases {
+            let result = Ember::validate_name(name, kind);
+
+            match result {
+                Err(EmberError::InvalidName { name: n, kind: k, reason: r }) => {
+                    assert_eq!(n, name);
+                    assert_eq!(k, kind);
+                    assert_eq!(r, reason);
+                }
+                _ => panic!("expected InvalidName error for input '{}'", name),
+            }
+        }
+    }
+
+    #[test]
+    fn test_validate_name_success_cases() {
+        let cases = vec![
+            ("users", Kind::Table),
+            ("_internal", Kind::Table),
+            ("column1", Kind::Column),
+            ("user_name", Kind::Column),
+        ];
+
+        for (name, kind) in cases {
+            assert!(Ember::validate_name(name, kind).is_ok());
+        }
+    }
+
 }

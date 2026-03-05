@@ -4,7 +4,7 @@ pub const INVALID_START_CHARACTER: &str = "Must start with a letter or underscor
 pub const INVALID_CHARACTERS: &str = "Must contain only alphanumeric characters or underscores.";
 pub const EMPTY_NAME:  &str = "Name must not be empty";
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Kind {
     Column,
     Table
