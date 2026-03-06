@@ -97,3 +97,38 @@ Example schema JSON:
     { "name": "name", "type": "TEXT" }
   ]
 }
+
+---
+
+5. Record Layout (Append-Only)
+
+Each appended record has the following layout:
+
+1. Record Length (u32)
+   - Length in bytes of record_bytes
+
+2. Record Bytes (variable)
+   - Encoded row payload
+
+3. Record Checksum (u32)
+   - CRC32 checksum of:
+      - record_length encoded as u32 little-endian
+      - followed by record_bytes
+   - The checksum does not include the checksum field itself
+
+----
+6. Row Encoding (v1)
+
+Row values are encoded in schema column order.
+
+For each column:
+
+**INT**
+- encoded as i64
+- 8 bytes
+- little-endian
+
+**TEXT**
+
+- encoded as: text length (u32, little-endian)
+- UTF-8 text bytes

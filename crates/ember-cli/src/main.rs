@@ -15,6 +15,10 @@ enum Commands {
     CreateTable {
         table_name: String,
         schema: Vec<String>,
+    },
+    Insert {
+        table_name: String,
+        record: Vec<String>,
     }
 }
 
@@ -27,6 +31,7 @@ fn run() -> EmberResult<()> {
     match cli.command {
         Commands::Init => ember.init()?,
         Commands::CreateTable {table_name, schema} => ember.create_table(&table_name, schema)?,
+        Commands::Insert { table_name, record } => ember.insert(&table_name,record)?,
     };
 
     Ok(())

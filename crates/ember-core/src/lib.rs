@@ -1,14 +1,15 @@
 use std::collections::HashSet;
-use std::fs::{self, create_dir_all};
+use std::fs::{self, File, OpenOptions, create_dir_all};
 use std::path::PathBuf;
-use std::io::Write;
+use std::io::{Read, Write};
 use crc32fast::Hasher;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{EmberError, EMPTY_NAME, INVALID_CHARACTERS, INVALID_START_CHARACTER, Kind};
 
 const VERSION: u16 = 1;
 const MAGIC: &str = "EMBR";
+const MAX_SCHEMA_SIZE: usize = 64 * 1024;
 
 pub mod error;
 
@@ -18,14 +19,14 @@ pub struct Ember {
     data_directory: PathBuf,
 }
 
-#[derive(Serialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum ColumnType {
     INT,
     TEXT
 }
 
-#[derive(Serialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct Column {
     #[serde(rename = "name")]
     col_name: String,
@@ -33,7 +34,7 @@ struct Column {
     col_type: ColumnType
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct Schema {
     columns: Vec<Column>
 }
@@ -99,9 +100,11 @@ impl Ember {
         Ok(schema_list)
     }
 
-    fn calculate_crc32(data:&[u8]) -> u32 {
+    fn calculate_crc32(slices: &[&[u8]]) -> u32 {
         let mut hasher = Hasher::new();
-        hasher.update(data);
+        for slice in slices {
+            hasher.update(slice);
+        }
         hasher.finalize()
     }
 
@@ -123,18 +126,135 @@ impl Ember {
             .map_err(|e| EmberError::json(e, format!("serializing schema for table '{}'", table_name)))?;
         let schema_len: u32 = serialized_schema.len() as u32;
         
-        let header_bytes = [
-            MAGIC.as_bytes(),
-            &VERSION.to_le_bytes(),
-            &schema_len.to_le_bytes(),
-            serialized_schema.as_bytes()
-        ].concat();
+        let header_bytes = [MAGIC.as_bytes(),
+        &VERSION.to_le_bytes(),
+        &schema_len.to_le_bytes(),
+        serialized_schema.as_bytes()];
+
         let checksum = Self::calculate_crc32(&header_bytes);
 
-        table.write_all(&header_bytes)
-            .map_err(|e| EmberError::io(e, format!("creating table file '{}'", table_name)))?;
+        for byte in &header_bytes {
+            table.write_all(byte)
+                .map_err(|e| EmberError::io(e, format!("creating table file '{}'", table_name)))?;
+        }
+
         table.write_all(&checksum.to_le_bytes())
             .map_err(|e| EmberError::io(e, format!("creating table file '{}'", table_name)))?;
+
+        Ok(())
+    }
+
+    fn read_table_header(&self, file: &mut File, table: String) -> EmberResult<Vec<Column>> {    
+        // Read fixed header
+        let mut fixed_header = [0u8; 10];
+        file.read_exact(&mut fixed_header)
+            .map_err(|e| EmberError::io(e, format!("reading header for '{}'", table)))?;
+
+        let magic = &fixed_header[0..4];
+        if magic != MAGIC.as_bytes() {
+            return Err(EmberError::TableCorrupted { table });
+        }
+    
+        let schema_len = u32::from_le_bytes(
+            fixed_header[6..10]
+                .try_into()
+                .map_err(|_| EmberError::TableCorrupted { table: table.clone() })?
+        );
+
+        if schema_len as usize > MAX_SCHEMA_SIZE {
+            return Err(EmberError::TableCorrupted { table });
+        }
+    
+        // Read schema bytes
+        let mut schema_bytes = vec![0u8; schema_len as usize];
+        file.read_exact(&mut schema_bytes)
+            .map_err(|e| EmberError::io(e, format!("reading schema for '{}'", table)))?;
+    
+        // Read stored checksum
+        let mut stored_checksum_bytes = [0u8; 4];
+        file.read_exact(&mut stored_checksum_bytes)
+            .map_err(|e| EmberError::io(e, format!("reading checksum for '{}'", table)))?;
+        let stored_checksum = u32::from_le_bytes(stored_checksum_bytes);
+
+        // Compute checksum
+        let checksum = Self::calculate_crc32(&[&fixed_header,
+            &schema_bytes]);
+    
+        if checksum != stored_checksum {
+            return Err(EmberError::TableCorrupted { table });
+        }
+
+        let version = u16::from_le_bytes(fixed_header[4..6].try_into().unwrap());
+        if version != VERSION {
+            return Err(EmberError::TableCorrupted { table });
+        }
+    
+        // Deserialize schema
+        let schema: Schema = serde_json::from_slice(&schema_bytes)
+            .map_err(|e| EmberError::json(e, format!("decoding schema for '{}'", table)))?;
+    
+        Ok(schema.columns)
+    }
+
+    pub fn insert(&self, table_name: &str, record: Vec<String>) -> EmberResult<()> {
+        if !self.data_directory.exists() {
+            return Err(EmberError::NotInitialized);
+        }
+        let table_name = table_name.trim();
+        let table_path = self.data_directory.join(table_name).with_extension("eb");
+        if !table_path.exists() {
+            return Err(EmberError::TableDoesNotExist { table: table_name.to_string() });
+        }
+
+        let mut file = OpenOptions::new()
+            .read(true)
+            .append(true)
+            .create(false)
+            .open(&table_path)
+            .map_err(|e| EmberError::io(e, format!("opening table '{}'", table_name)))?;
+
+        let schema = self.read_table_header(& mut file, table_name.to_string())?;
+
+        if record.len() != schema.len() {
+            return Err(EmberError::ColumnCountMismatch{expected_count: schema.len(),provided_count: record.len()});
+        }
+
+        let mut row_bytes: Vec<u8> = Vec::new();
+
+        for (col, val) in schema.iter().zip(&record) {
+            match col.col_type {
+                ColumnType::INT => {
+                    let sanitized_val = val.parse::<i64>().map_err(|_| {
+                        EmberError::IncompatibleDataTypes {
+                            val: val.to_string(),
+                            col_type: ColumnType::INT
+                        }
+                    })?;
+
+                row_bytes.extend(sanitized_val.to_le_bytes());
+                },
+                ColumnType::TEXT => {
+                    let bytes = val.as_bytes();
+                    let len = bytes.len() as u32;
+
+                    row_bytes.extend(&len.to_le_bytes());
+                    row_bytes.extend(val.as_bytes());
+                },
+            }
+        }
+
+        let row_len = row_bytes.len() as u32;
+
+        file.write_all(&row_len.to_le_bytes())
+            .map_err(|e| EmberError::io(e, format!("inserting row for '{}'", table_name)))?;
+        file.write_all(&row_bytes)
+            .map_err(|e| EmberError::io(e, format!("inserting row for '{}'", table_name)))?;
+
+        let checksum = Self::calculate_crc32(&[&row_len.to_le_bytes(),
+        &row_bytes]);
+
+        file.write_all(&checksum.to_le_bytes())
+            .map_err(|e| EmberError::io(e, format!("inserting row for '{}'", table_name)))?;
 
         Ok(())
     }

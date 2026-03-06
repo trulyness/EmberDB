@@ -1,5 +1,7 @@
 use std::{fmt,io};
 
+use crate::ColumnType;
+
 pub const INVALID_START_CHARACTER: &str = "Must start with a letter or underscore";
 pub const INVALID_CHARACTERS: &str = "Must contain only alphanumeric characters or underscores.";
 pub const EMPTY_NAME:  &str = "Name must not be empty";
@@ -29,6 +31,20 @@ pub enum EmberError {
     },
     TableAlreadyExists {
         table: String,
+    },
+    TableDoesNotExist {
+        table: String,
+    },
+    TableCorrupted {
+        table: String,
+    },
+    IncompatibleDataTypes {
+        val: String,
+        col_type: ColumnType,
+    },
+    ColumnCountMismatch {
+        expected_count: usize,
+        provided_count: usize
     },
     NotInitialized,
     Io {
@@ -62,6 +78,12 @@ impl fmt::Display for EmberError {
             EmberError::TableAlreadyExists { table } => {
                 write!(f, "Table '{}' already exists", table)
             }
+            EmberError::TableDoesNotExist { table } => {
+                write!(f,  "Table '{}' does not exist", table)
+            }
+            EmberError::TableCorrupted { table } => {
+                write!(f,  "Table '{}' is corrupted", table)
+            }
             EmberError::NotInitialized => {
                 write!(f, "Ember project is not initialized")
             }
@@ -71,6 +93,12 @@ impl fmt::Display for EmberError {
             EmberError::Json { err, context } => {
                 write!(f, "JSON error during {}: {}", context, err)
             }
+            EmberError::IncompatibleDataTypes { val, col_type } => {
+                write!(f, "Expected {} found {}", col_type, val)
+            },
+            EmberError::ColumnCountMismatch { expected_count, provided_count } => {
+                write!(f, "Column count mismatch: expected {}, found {}", expected_count, provided_count)
+            },
         }
     }
 }
@@ -92,9 +120,13 @@ impl EmberError {
             EmberError::UnknownColumnType { .. } => 2,
             EmberError::ColumnAlreadyExists { .. } => 2,
             EmberError::TableAlreadyExists { .. } => 2,
+            EmberError::TableDoesNotExist { .. } => 2,
             EmberError::NotInitialized => 2,
             EmberError::Io { .. } => 1,
             EmberError::Json { .. } => 1,
+            EmberError::TableCorrupted { .. } => 1,
+            EmberError::IncompatibleDataTypes { .. } => 2,
+            EmberError::ColumnCountMismatch { .. } => 2,
         }
     }
 }
@@ -106,6 +138,15 @@ impl fmt::Display for Kind {
         match self {
             Kind::Column => write!(f,"column"),
             Kind::Table => write!(f,"table"),
+        }
+    }
+}
+
+impl fmt::Display for ColumnType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ColumnType::INT => write!(f,"int"),
+            ColumnType::TEXT => write!(f,"text"),
         }
     }
 }
