@@ -1,15 +1,15 @@
-use std::{fmt,io};
+use std::{fmt, io};
 
 use crate::ColumnType;
 
 pub const INVALID_START_CHARACTER: &str = "Must start with a letter or underscore";
 pub const INVALID_CHARACTERS: &str = "Must contain only alphanumeric characters or underscores.";
-pub const EMPTY_NAME:  &str = "Name must not be empty";
+pub const EMPTY_NAME: &str = "Name must not be empty";
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Kind {
     Column,
-    Table
+    Table,
 }
 
 #[derive(Debug)]
@@ -17,7 +17,7 @@ pub enum EmberError {
     InvalidName {
         name: String,
         kind: Kind,
-        reason: String
+        reason: String,
     },
     EmptySchema,
     InvalidSchemaToken {
@@ -44,7 +44,7 @@ pub enum EmberError {
     },
     ColumnCountMismatch {
         expected_count: usize,
-        provided_count: usize
+        provided_count: usize,
     },
     NotInitialized,
     Io {
@@ -60,11 +60,11 @@ pub enum EmberError {
 impl fmt::Display for EmberError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            EmberError::InvalidName { name,kind , reason} => {
+            EmberError::InvalidName { name, kind, reason } => {
                 write!(f, "Invalid {} name '{}': {}", kind, name, reason)
             }
             EmberError::EmptySchema => {
-                write!(f,"Schema cannot be empty!")
+                write!(f, "Schema cannot be empty!")
             }
             EmberError::InvalidSchemaToken { token } => {
                 write!(f, "Invalid column definition: {}", token)
@@ -79,10 +79,10 @@ impl fmt::Display for EmberError {
                 write!(f, "Table '{}' already exists", table)
             }
             EmberError::TableDoesNotExist { table } => {
-                write!(f,  "Table '{}' does not exist", table)
+                write!(f, "Table '{}' does not exist", table)
             }
             EmberError::TableCorrupted { table } => {
-                write!(f,  "Table '{}' is corrupted", table)
+                write!(f, "Table '{}' is corrupted", table)
             }
             EmberError::NotInitialized => {
                 write!(f, "Ember project is not initialized")
@@ -95,21 +95,34 @@ impl fmt::Display for EmberError {
             }
             EmberError::IncompatibleDataTypes { val, col_type } => {
                 write!(f, "Expected {} found {}", col_type, val)
-            },
-            EmberError::ColumnCountMismatch { expected_count, provided_count } => {
-                write!(f, "Column count mismatch: expected {}, found {}", expected_count, provided_count)
-            },
+            }
+            EmberError::ColumnCountMismatch {
+                expected_count,
+                provided_count,
+            } => {
+                write!(
+                    f,
+                    "Column count mismatch: expected {}, found {}",
+                    expected_count, provided_count
+                )
+            }
         }
     }
 }
 
 impl EmberError {
     pub fn io<E: Into<io::Error>, S: Into<String>>(err: E, context: S) -> Self {
-        EmberError::Io { err: err.into(), context: context.into() }
+        EmberError::Io {
+            err: err.into(),
+            context: context.into(),
+        }
     }
 
     pub fn json<E: Into<serde_json::Error>, S: Into<String>>(err: E, context: S) -> Self {
-        EmberError::Json { err: err.into(), context: context.into() }
+        EmberError::Json {
+            err: err.into(),
+            context: context.into(),
+        }
     }
 
     pub fn exit_code(&self) -> i32 {
@@ -136,8 +149,8 @@ impl std::error::Error for EmberError {}
 impl fmt::Display for Kind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Kind::Column => write!(f,"column"),
-            Kind::Table => write!(f,"table"),
+            Kind::Column => write!(f, "column"),
+            Kind::Table => write!(f, "table"),
         }
     }
 }
@@ -145,8 +158,8 @@ impl fmt::Display for Kind {
 impl fmt::Display for ColumnType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ColumnType::INT => write!(f,"int"),
-            ColumnType::TEXT => write!(f,"text"),
+            ColumnType::INT => write!(f, "int"),
+            ColumnType::TEXT => write!(f, "text"),
         }
     }
 }
