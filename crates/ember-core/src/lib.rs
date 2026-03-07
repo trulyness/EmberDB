@@ -337,22 +337,55 @@ impl Ember {
             for col in schema {
                 match col.col_type {
                     ColumnType::INT => {
+                        if cursor + 8 > row_bytes.len() {
+                            return Err(EmberError::TableCorrupted {
+                                table: table.clone(),
+                            });
+                        }
+
                         let num =
-                            i64::from_le_bytes(row_bytes[cursor..cursor + 8].try_into().unwrap());
+                            i64::from_le_bytes(row_bytes[cursor..cursor + 8].try_into().map_err(
+                                |_| EmberError::TableCorrupted {
+                                    table: table.clone(),
+                                },
+                            )?);
                         row.push(Value::Int(num));
                         cursor += 8;
                     }
                     ColumnType::TEXT => {
+                        if cursor + 4 > row_bytes.len() {
+                            return Err(EmberError::TableCorrupted {
+                                table: table.clone(),
+                            });
+                        }
                         let len =
-                            u32::from_le_bytes(row_bytes[cursor..cursor + 4].try_into().unwrap())
-                                as usize;
+                            u32::from_le_bytes(row_bytes[cursor..cursor + 4].try_into().map_err(
+                                |_| EmberError::TableCorrupted {
+                                    table: table.clone(),
+                                },
+                            )?) as usize;
                         cursor += 4;
-                        let text =
-                            String::from_utf8(row_bytes[cursor..cursor + len].to_vec()).unwrap();
+
+                        if cursor + len > row_bytes.len() {
+                            return Err(EmberError::TableCorrupted {
+                                table: table.clone(),
+                            });
+                        }
+
+                        let text = String::from_utf8(row_bytes[cursor..cursor + len].to_vec())
+                            .map_err(|_| EmberError::TableCorrupted {
+                                table: table.clone(),
+                            })?;
                         row.push(Value::Text(text));
                         cursor += len;
                     }
                 }
+            }
+
+            if cursor != row_bytes.len() {
+                return Err(EmberError::TableCorrupted {
+                    table: table.clone(),
+                });
             }
 
             rows.push(row);
